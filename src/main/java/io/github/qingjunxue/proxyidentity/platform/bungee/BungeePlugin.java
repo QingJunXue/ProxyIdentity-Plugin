@@ -14,14 +14,13 @@
  * You should have received a copy of the GNU Lesser General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-package net.andylizi.haproxydetector.bungee;
+package io.github.qingjunxue.proxyidentity.platform.bungee;
 
 import java.io.IOException;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
 import java.lang.reflect.Field;
-import java.nio.file.Path;
 import java.util.Collection;
 import java.util.NoSuchElementException;
 import java.util.Set;
@@ -34,17 +33,18 @@ import com.google.common.collect.ForwardingSet;
 import io.netty.channel.*;
 import io.netty.handler.codec.haproxy.HAProxyMessageDecoder;
 import io.netty.util.AttributeKey;
-import net.andylizi.haproxydetector.HAProxyDetectorHandler;
-import net.andylizi.haproxydetector.MetricsId;
-import net.andylizi.haproxydetector.ProxyWhitelist;
+import io.github.qingjunxue.proxyidentity.ProxyProtocolSwitchHandler;
+import io.github.qingjunxue.proxyidentity.TelemetryCharts;
+import io.github.qingjunxue.proxyidentity.TrustedProxyList;
+import io.github.qingjunxue.proxyidentity.GuardConfig;
 import net.md_5.bungee.api.config.ListenerInfo;
 import net.md_5.bungee.api.plugin.Listener;
 import net.md_5.bungee.api.plugin.Plugin;
 import org.bstats.bungeecord.Metrics;
 
-import static net.andylizi.haproxydetector.ReflectionUtil.sneakyThrow;
+import static io.github.qingjunxue.proxyidentity.ReflectiveAccess.sneakyThrow;
 
-public final class BungeeMain extends Plugin implements Listener {
+public final class BungeePlugin extends Plugin implements Listener {
     static Logger logger;
     static Predicate<ListenerInfo> proxyProtocolChecker;
     static AttributeKey<ListenerInfo> listenerAttr;
@@ -78,19 +78,15 @@ public final class BungeeMain extends Plugin implements Listener {
     @SuppressWarnings({"unchecked", "deprecation"})
     public void onEnable() {
         try {
-            Path path = this.getDataFolder().toPath().resolve("whitelist.conf");
-            ProxyWhitelist whitelist = ProxyWhitelist.loadOrDefault(path).orElse(null);
-            if (whitelist == null) {
-                logger.warning("!!! ==============================");
-                logger.warning("!!! 代理白名单已在配置中禁用。");
-                logger.warning("!!! 这非常危险，请勿在生产环境中这样做！");
-                logger.warning("!!! ==============================");
-            } else if (whitelist.size() == 0) {
-                logger.warning("代理白名单为空。这将拒绝所有代理连接！");
-            }
-            ProxyWhitelist.whitelist = whitelist;
+            // 加载通用配置（包含 debug 开关）
+            GuardConfig.loadOrDefault(this.getDataFolder().toPath());
         } catch (IOException e) {
-            throw new RuntimeException("加载代理白名单失败", e);
+            logger.log(Level.WARNING, "加载配置失败，将使用默认配置", e);
+        }
+
+        TrustedProxyList.whitelist = GuardConfig.trustedProxies;
+        if (TrustedProxyList.whitelist.size() == 0) {
+            logger.warning("代理白名单为空。这将拒绝所有代理连接！");
         }
 
         try {
@@ -110,8 +106,8 @@ public final class BungeeMain extends Plugin implements Listener {
             initMapField = ChannelInitializer.class.getDeclaredField("initMap");
             initMapField.setAccessible(true);
 
-            Set<ChannelHandlerContext> originalInitMap = (Set<ChannelHandlerContext>) initMapField.get(serverChild);
-            Set<ChannelHandlerContext> myInitMap = new DetectorInitSet(originalInitMap);
+            this.originalInitMap = (Set<ChannelHandlerContext>) initMapField.get(serverChild);
+            Set<ChannelHandlerContext> myInitMap = new DetectorInitSet(this.originalInitMap);
             initMapField.set(serverChild, myInitMap);
         } catch (Throwable e) {
             sneakyThrow(e);
@@ -127,7 +123,7 @@ public final class BungeeMain extends Plugin implements Listener {
 
         try {
             Metrics metrics = new Metrics(this, 12605);
-            metrics.addCustomChart(MetricsId.createWhitelistCountChart());
+            metrics.addCustomChart(TelemetryCharts.createWhitelistCountChart());
         } catch (Throwable t) {
             logger.log(Level.WARNING, "启动统计上报失败", t);
         }
@@ -180,14 +176,14 @@ public final class BungeeMain extends Plugin implements Listener {
             }
 
             ChannelPipeline pipeline = ch.pipeline();
-            if (!ch.isOpen() || pipeline.get("haproxy-detector") != null)
+            if (!ch.isOpen() || pipeline.get("proxy-identity") != null)
                 return;
 
-            HAProxyDetectorHandler detectorHandler = new HAProxyDetectorHandler(logger, null);
+            ProxyProtocolSwitchHandler detectorHandler = new ProxyProtocolSwitchHandler(logger, null);
             ChannelHandler oldHandler;
             if ((oldHandler = pipeline.get("haproxy-decoder")) != null
                     || (oldHandler = pipeline.get(HAProxyMessageDecoder.class)) != null) {
-                pipeline.replace(oldHandler, "haproxy-detector", detectorHandler);
+                pipeline.replace(oldHandler, "proxy-identity", detectorHandler);
             } else {
                 throw new NoSuchElementException("未启用 HAProxy 支持");
             }

@@ -1,4 +1,4 @@
-package net.andylizi.haproxydetector;
+package io.github.qingjunxue.proxyidentity;
 
 import org.apache.commons.validator.routines.InetAddressValidator;
 import org.jetbrains.annotations.NotNull;
@@ -13,33 +13,33 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-public final class CIDR {
-    public static List<CIDR> parse(@NotNull String cidr) throws IllegalArgumentException, UnknownHostException {
+public final class IpRange {
+    public static List<IpRange> parse(@NotNull String cidr) throws IllegalArgumentException, UnknownHostException {
         int idx = cidr.lastIndexOf('/');
         if (idx != -1) {
             String addrPart = cidr.substring(0, idx);
             if (addrPart.isEmpty()) {
-                throw new IllegalArgumentException("无效的 CIDR 字符串：\"" + cidr + "\"");
+                throw new IllegalArgumentException("无效的 IpRange 字符串：\"" + cidr + "\"");
             }
 
             if (!InetAddressValidator.getInstance().isValid(addrPart)) {
-                throw new IllegalArgumentException("CIDR 必须由有效的 IP 地址组成：" + addrPart);
+                throw new IllegalArgumentException("IpRange 必须由有效的 IP 地址组成：" + addrPart);
             }
 
             try {
                 InetAddress addr = InetAddress.getByName(addrPart);
                 int prefix = Integer.parseInt(cidr.substring(idx + 1));
-                return Collections.singletonList(new CIDR(addr, prefix));
+                return Collections.singletonList(new IpRange(addr, prefix));
             } catch (UnknownHostException | IllegalArgumentException | IndexOutOfBoundsException e) {
-                throw new IllegalArgumentException("无效的 CIDR 字符串：\"" + cidr + "\"", e);
+                throw new IllegalArgumentException("无效的 IpRange 字符串：\"" + cidr + "\"", e);
             }
         } else {
-            if (cidr.isEmpty()) throw new IllegalArgumentException("空的 CIDR 字符串");
+            if (cidr.isEmpty()) throw new IllegalArgumentException("空的 IpRange 字符串");
             InetAddress[] addresses = InetAddress.getAllByName(cidr);
             if (addresses.length == 1) {
-                return Collections.singletonList(new CIDR(addresses[0]));
+                return Collections.singletonList(new IpRange(addresses[0]));
             }
-            return Stream.of(addresses).map(CIDR::new).collect(Collectors.toList());
+            return Stream.of(addresses).map(IpRange::new).collect(Collectors.toList());
         }
     }
 
@@ -49,7 +49,7 @@ public final class CIDR {
     private final BigInteger mask;
     private final BigInteger network;
 
-    public CIDR(@NotNull InetAddress addr, int prefix) throws IllegalArgumentException {
+    public IpRange(@NotNull InetAddress addr, int prefix) throws IllegalArgumentException {
         this.addr = Objects.requireNonNull(addr);
         this.prefix = prefix;
 
@@ -63,11 +63,11 @@ public final class CIDR {
         this.network = new BigInteger(1, addr.getAddress()).and(mask);
     }
 
-    private CIDR(@NotNull InetAddress addr) {
+    private IpRange(@NotNull InetAddress addr) {
         this(addr, addr.getAddress().length * Byte.SIZE);
     }
 
-    CIDR(@NotNull String addr, int prefix) throws IllegalArgumentException, UnknownHostException {
+    IpRange(@NotNull String addr, int prefix) throws IllegalArgumentException, UnknownHostException {
         this(InetAddress.getByName(addr), prefix);
     }
 
@@ -103,7 +103,7 @@ public final class CIDR {
     public boolean equals(Object o) {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
-        CIDR cidr = (CIDR) o;
+        IpRange cidr = (IpRange) o;
         return prefix == cidr.prefix && addr.equals(cidr.addr);
     }
 
