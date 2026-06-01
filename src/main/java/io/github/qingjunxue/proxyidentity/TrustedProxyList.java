@@ -1,4 +1,4 @@
-package net.andylizi.haproxydetector;
+package io.github.qingjunxue.proxyidentity;
 
 import org.jetbrains.annotations.Nullable;
 
@@ -15,9 +15,9 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 
-public class ProxyWhitelist {
+public class TrustedProxyList {
     @Nullable
-    public static ProxyWhitelist whitelist = new ProxyWhitelist(new ArrayList<>(0));
+    public static TrustedProxyList whitelist = new TrustedProxyList(new ArrayList<>(0));
 
     private static volatile InetAddress lastWarning;
 
@@ -36,17 +36,17 @@ public class ProxyWhitelist {
         return Optional.empty();
     }
 
-    public static Optional<ProxyWhitelist> loadOrDefault(Path path) throws IOException {
+    public static Optional<TrustedProxyList> loadOrDefault(Path path) throws IOException {
         Files.createDirectories(path.getParent());
         if (!Files.exists(path) || Files.isDirectory(path)) {
             Files.write(path, Arrays.asList(
                 "# 允许的代理 IP 列表",
                 "#",
                 "# 空白名单将拒绝所有代理。",
-                "# 每一行必须是有效的 IP 地址、域名或 CIDR。",
+                "# 每一行必须是有效的 IP 地址、域名或 IpRange。",
                 "# 域名仅在启动时解析一次。",
                 "# 单个域名可解析出多个 A/AAAA 记录，均会被允许。",
-                "# 域名不支持附带 CIDR 前缀。",
+                "# 域名不支持附带 IpRange 前缀。",
                 "",
                 "127.0.0.0/8",
                 "::1/128"
@@ -55,8 +55,8 @@ public class ProxyWhitelist {
         return load(path);
     }
 
-    public static Optional<ProxyWhitelist> load(Path path) throws IOException {
-        ArrayList<CIDR> list = new ArrayList<>();
+    public static Optional<TrustedProxyList> load(Path path) throws IOException {
+        ArrayList<IpRange> list = new ArrayList<>();
         try (BufferedReader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
             boolean first = true;
             String line;
@@ -68,24 +68,36 @@ public class ProxyWhitelist {
                     return Optional.empty();
                 }
                 first =false;
-                list.addAll(CIDR.parse(line));
+                list.addAll(IpRange.parse(line));
             }
         }
-        return Optional.of(new ProxyWhitelist(list));
+        return Optional.of(new TrustedProxyList(list));
     }
 
-    private final List<CIDR> list;
+    public static TrustedProxyList parseEntries(List<String> entries) throws IOException {
+        ArrayList<IpRange> list = new ArrayList<>();
+        for (String entry : entries) {
+            String trimmed = entry.trim();
+            if (trimmed.isEmpty() || trimmed.startsWith("#")) {
+                continue;
+            }
+            list.addAll(IpRange.parse(trimmed));
+        }
+        return new TrustedProxyList(list);
+    }
 
-    private ProxyWhitelist(ArrayList<CIDR> list) {
+    private final List<IpRange> list;
+
+    private TrustedProxyList(ArrayList<IpRange> list) {
         this.list = list;
     }
 
-    public ProxyWhitelist(List<CIDR> list) {
+    public TrustedProxyList(List<IpRange> list) {
         this.list = new ArrayList<>(list);
     }
 
     public boolean matches(InetAddress addr) {
-        for (CIDR ip : list) {
+        for (IpRange ip : list) {
             if (ip.contains(addr)) {
                 return true;
             }
@@ -99,6 +111,6 @@ public class ProxyWhitelist {
 
     @Override
     public String toString() {
-        return "ProxyWhitelist" + list;
+        return "TrustedProxyList" + list;
     }
 }

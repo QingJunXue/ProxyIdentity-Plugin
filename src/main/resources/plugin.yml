@@ -1,11 +1,11 @@
-name: HAProxyDetector
-main: net.andylizi.haproxydetector.bukkit.BukkitMain
+name: ProxyIdentity
+main: io.github.qingjunxue.proxyidentity.platform.bukkit.BukkitPlugin
 version: ${project.version}
-authors: [ACJ_DragonDream, andylizi]
+authors: [ACJ_DragonDream]
 load: STARTUP
-depend: [ProtocolLib]
+softdepend: [ProtocolLib]
 # 此插件为通用插件，应支持所有版本的《Minecraft》。
 # 如果您遇到关于API版本的错误，请随意将其更改为任何您想要的版本。
-api-version: 1.13
+${bukkit.api.version.line}
 awareness:
     - !@UTF8

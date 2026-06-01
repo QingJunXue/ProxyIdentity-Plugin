@@ -14,12 +14,12 @@
  * You should have received a copy of the GNU Lesser General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-package net.andylizi.haproxydetector;
+package io.github.qingjunxue.proxyidentity;
 
 import java.lang.reflect.Field;
 
-public final class ReflectionUtil {
-    private ReflectionUtil() {
+public final class ReflectiveAccess {
+    private ReflectiveAccess() {
         throw new AssertionError();
     }
 
