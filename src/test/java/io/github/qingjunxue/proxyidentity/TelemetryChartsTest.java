@@ -1,5 +1,8 @@
 package io.github.qingjunxue.proxyidentity;
 
+import io.github.qingjunxue.proxyidentity.security.IpRange;
+import io.github.qingjunxue.proxyidentity.security.TrustedProxyGate;
+import io.github.qingjunxue.proxyidentity.security.TrustedProxyList;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -11,18 +14,18 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 class TelemetryChartsTest {
     @AfterEach
     void resetWhitelist() {
-        TrustedProxyList.whitelist = new TrustedProxyList(Collections.emptyList());
+        TrustedProxyGate.whitelist = new TrustedProxyList(Collections.emptyList());
     }
 
     @Test
     void whitelistCountDistinguishesDisabledWhitelist() {
-        TrustedProxyList.whitelist = null;
+        TrustedProxyGate.whitelist = null;
         assertEquals("disabled", TelemetryCharts.getWhitelistCountLabel());
     }
 
     @Test
     void whitelistCountReportsEntryCount() throws UnknownHostException {
-        TrustedProxyList.whitelist = new TrustedProxyList(Collections.singletonList(new IpRange("127.0.0.0", 8)));
+        TrustedProxyGate.whitelist = new TrustedProxyList(Collections.singletonList(new IpRange("127.0.0.0", 8)));
         assertEquals("1", TelemetryCharts.getWhitelistCountLabel());
     }
 }

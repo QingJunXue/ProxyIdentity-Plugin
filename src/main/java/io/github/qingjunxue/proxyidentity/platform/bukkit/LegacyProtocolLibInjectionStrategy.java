@@ -11,13 +11,13 @@ import com.comphenix.protocol.reflect.FuzzyReflection;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelPipeline;
-import io.github.qingjunxue.proxyidentity.ProxyProtocolSwitchHandler;
-import io.github.qingjunxue.proxyidentity.ReflectiveAccess;
+import io.github.qingjunxue.proxyidentity.protocol.ProxyProtocolSwitchHandler;
+import io.github.qingjunxue.proxyidentity.util.PipelineInjector;
+import io.github.qingjunxue.proxyidentity.util.ReflectiveAccess;
 import org.bukkit.plugin.Plugin;
 import org.jetbrains.annotations.NotNull;
 
 import java.lang.reflect.Field;
-import java.util.NoSuchElementException;
 import java.util.logging.Logger;
 
 public class LegacyProtocolLibInjectionStrategy implements ProtocolLibInjectionStrategy {
@@ -74,7 +74,7 @@ public class LegacyProtocolLibInjectionStrategy implements ProtocolLibInjectionS
                                              ChannelListener listener,
                                              TemporaryPlayerFactory playerFactory) {
             ChannelPipeline pipeline = channel.pipeline();
-            if (channel.isOpen() && pipeline.get("proxy-identity") == null) {
+            if (channel.isOpen() && pipeline.get("proxyidentity") == null) {
                 ChannelHandler networkManager = BukkitPlugin.getNetworkManager(pipeline);
                 inject(pipeline, networkManager);
             }
@@ -86,11 +86,7 @@ public class LegacyProtocolLibInjectionStrategy implements ProtocolLibInjectionS
             synchronized (networkManager) {
                 ProxyProtocolSwitchHandler detectorHandler = new ProxyProtocolSwitchHandler(logger,
                         new BukkitProxyAddressHandler(networkManager));
-                try {
-                    pipeline.addAfter("timeout", "proxy-identity", detectorHandler);
-                } catch (NoSuchElementException e) {
-                    pipeline.addFirst("proxy-identity", detectorHandler);
-                }
+                PipelineInjector.addAfterOrFirst(pipeline, "timeout", "proxyidentity", detectorHandler);
             }
         }
     }

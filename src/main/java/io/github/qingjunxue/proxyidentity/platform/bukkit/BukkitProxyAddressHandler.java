@@ -14,8 +14,9 @@ import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.haproxy.HAProxyMessage;
-import static io.github.qingjunxue.proxyidentity.ReflectiveAccess.sneakyThrow;
-import io.github.qingjunxue.proxyidentity.GuardConfig;
+import static io.github.qingjunxue.proxyidentity.util.ReflectiveAccess.sneakyThrow;
+import io.github.qingjunxue.proxyidentity.ProxyIdentityConfig;
+import io.github.qingjunxue.proxyidentity.util.PluginLogger;
 
 class BukkitProxyAddressHandler extends SimpleChannelInboundHandler<HAProxyMessage> {
     private static volatile MethodHandle freeAddressSetter;
@@ -48,9 +49,9 @@ class BukkitProxyAddressHandler extends SimpleChannelInboundHandler<HAProxyMessa
     @Override
     public void channelRead0(ChannelHandlerContext ctx, HAProxyMessage msg) {
         SocketAddress realAddress = new InetSocketAddress(msg.sourceAddress(), msg.sourcePort());
-		if (GuardConfig.debug) {
-			BukkitPlugin.logger.log(Level.INFO, "通过代理设置真实远程地址 {0} -> {1}",
-					new Object[] { ctx.channel().remoteAddress(), realAddress });
+		if (ProxyIdentityConfig.debug) {
+			PluginLogger.jul(BukkitPlugin.logger, Level.INFO,
+					"通过代理设置真实远程地址 " + ctx.channel().remoteAddress() + " -> " + realAddress, null);
 		}
         try {
             addressSetter.invokeExact(realAddress);
@@ -59,3 +60,4 @@ class BukkitProxyAddressHandler extends SimpleChannelInboundHandler<HAProxyMessa
         }
     }
 }
+

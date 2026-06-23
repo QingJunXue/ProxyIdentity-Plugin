@@ -33,16 +33,18 @@ import com.google.common.collect.ForwardingSet;
 import io.netty.channel.*;
 import io.netty.handler.codec.haproxy.HAProxyMessageDecoder;
 import io.netty.util.AttributeKey;
-import io.github.qingjunxue.proxyidentity.ProxyProtocolSwitchHandler;
+import io.github.qingjunxue.proxyidentity.protocol.ProxyProtocolSwitchHandler;
 import io.github.qingjunxue.proxyidentity.TelemetryCharts;
-import io.github.qingjunxue.proxyidentity.TrustedProxyList;
-import io.github.qingjunxue.proxyidentity.GuardConfig;
+import io.github.qingjunxue.proxyidentity.ProxyIdentityConfig;
+import io.github.qingjunxue.proxyidentity.PlatformBootstrap;
+import io.github.qingjunxue.proxyidentity.util.PipelineInjector;
+import io.github.qingjunxue.proxyidentity.util.PluginLogger;
 import net.md_5.bungee.api.config.ListenerInfo;
 import net.md_5.bungee.api.plugin.Listener;
 import net.md_5.bungee.api.plugin.Plugin;
 import org.bstats.bungeecord.Metrics;
 
-import static io.github.qingjunxue.proxyidentity.ReflectiveAccess.sneakyThrow;
+import static io.github.qingjunxue.proxyidentity.util.ReflectiveAccess.sneakyThrow;
 
 public final class BungeePlugin extends Plugin implements Listener {
     static Logger logger;
@@ -77,17 +79,8 @@ public final class BungeePlugin extends Plugin implements Listener {
     @Override
     @SuppressWarnings({"unchecked", "deprecation"})
     public void onEnable() {
-        try {
-            // 加载通用配置（包含 debug 开关）
-            GuardConfig.loadOrDefault(this.getDataFolder().toPath());
-        } catch (IOException e) {
-            logger.log(Level.WARNING, "加载配置失败，将使用默认配置", e);
-        }
-
-        TrustedProxyList.whitelist = GuardConfig.trustedProxies;
-        if (TrustedProxyList.whitelist.size() == 0) {
-            logger.warning("代理白名单为空。这将拒绝所有代理连接！");
-        }
+        // 使用统一的启动流程
+        PlatformBootstrap.initializeSafely(this.getDataFolder().toPath(), logger);
 
         try {
             Class<?> pipelineUtilsClass = Class.forName("net.md_5.bungee.netty.PipelineUtils", true,
@@ -117,15 +110,15 @@ public final class BungeePlugin extends Plugin implements Listener {
         if (proxyProtocolChecker != null) {
             if (Stream.concat(getProxy().getConfigurationAdapter().getListeners().stream(),
                     getProxy().getConfig().getListeners().stream()).noneMatch(proxyProtocolChecker)) {
-                logger.warning("代理协议已禁用，插件可能无法正常工作！");
+                PluginLogger.warning(logger, "代理协议已禁用，插件可能无法正常工作！");
             }
         }
 
         try {
-            Metrics metrics = new Metrics(this, 12605);
+            Metrics metrics = new Metrics(this, 32099);
             metrics.addCustomChart(TelemetryCharts.createWhitelistCountChart());
         } catch (Throwable t) {
-            logger.log(Level.WARNING, "启动统计上报失败", t);
+            PluginLogger.jul(logger, Level.WARNING, "启动统计上报失败", t);
         }
     }
 
@@ -176,17 +169,18 @@ public final class BungeePlugin extends Plugin implements Listener {
             }
 
             ChannelPipeline pipeline = ch.pipeline();
-            if (!ch.isOpen() || pipeline.get("proxy-identity") != null)
+            if (!PipelineInjector.canInject(pipeline, "proxyidentity"))
                 return;
 
             ProxyProtocolSwitchHandler detectorHandler = new ProxyProtocolSwitchHandler(logger, null);
             ChannelHandler oldHandler;
             if ((oldHandler = pipeline.get("haproxy-decoder")) != null
                     || (oldHandler = pipeline.get(HAProxyMessageDecoder.class)) != null) {
-                pipeline.replace(oldHandler, "proxy-identity", detectorHandler);
+                pipeline.replace(oldHandler, "proxyidentity", detectorHandler);
             } else {
                 throw new NoSuchElementException("未启用 HAProxy 支持");
             }
         }
     }
 }
+

@@ -8,15 +8,23 @@ import com.velocitypowered.api.plugin.annotation.DataDirectory;
 import com.velocitypowered.api.proxy.ProxyServer;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandler;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandler;
+import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelPipeline;
 import io.netty.handler.codec.ByteToMessageDecoder;
 import io.netty.handler.codec.haproxy.HAProxyMessageDecoder;
-import io.github.qingjunxue.proxyidentity.ProxyProtocolSwitchHandler;
+import io.netty.handler.timeout.ReadTimeoutException;
+import io.netty.handler.timeout.ReadTimeoutHandler;
+import io.github.qingjunxue.proxyidentity.PlatformBootstrap;
+import io.github.qingjunxue.proxyidentity.ProxyIdentityConfig;
 import io.github.qingjunxue.proxyidentity.TelemetryCharts;
-import io.github.qingjunxue.proxyidentity.TrustedProxyList;
-import io.github.qingjunxue.proxyidentity.ReflectiveAccess;
-import io.github.qingjunxue.proxyidentity.GuardConfig;
+import io.github.qingjunxue.proxyidentity.protocol.ProxyProtocolSwitchHandler;
+import io.github.qingjunxue.proxyidentity.util.LoggerBridge;
+import io.github.qingjunxue.proxyidentity.util.ReflectiveAccess;
+import io.github.qingjunxue.proxyidentity.util.PipelineInjector;
+import io.github.qingjunxue.proxyidentity.util.PluginLogger;
 import org.bstats.velocity.Metrics;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
@@ -31,12 +39,12 @@ import java.util.Map;
 import java.util.logging.Handler;
 import java.util.logging.LogRecord;
 
-import static io.github.qingjunxue.proxyidentity.ReflectiveAccess.sneakyThrow;
+import static io.github.qingjunxue.proxyidentity.util.ReflectiveAccess.sneakyThrow;
 
 @Plugin(
-        id = "proxy-identity",
+        id = "proxyidentity",
         name = "ProxyIdentity",
-        version = "1.0.0",
+        version = "1.2.0",
         description = "允许同时接受直连与通过 HAProxy 转发的代理连接。",
         authors = {"ACJ_DragonDream"},
         url = "https://github.com/QingJunXue/proxy-identity"
@@ -57,21 +65,20 @@ public final class VelocityPlugin {
 
     @Subscribe
     public void onProxyInitialization(ProxyInitializeEvent event) throws ReflectiveOperationException, IOException {
-        // 加载通用配置（包含 debug 开关）
-        GuardConfig.loadOrDefault(this.dataDirectory);
-
-        TrustedProxyList.whitelist = GuardConfig.trustedProxies;
-        if (TrustedProxyList.whitelist.size() == 0) {
-            logger.warn("代理白名单为空。这将拒绝所有代理连接！");
+        // 使用统一的启动流程
+        try {
+            PlatformBootstrap.initialize(this.dataDirectory, LoggerBridge.createJulToSlf4jBridge(logger));
+        } catch (IOException e) {
+            PluginLogger.warn(logger, "加载配置失败，将使用默认配置", e);
         }
 
         inject();
 
         try {
-            Metrics metrics = metricsFactory.make(this, 14442);
+            Metrics metrics = metricsFactory.make(this, 32100);
             metrics.addCustomChart(TelemetryCharts.createWhitelistCountChart());
         } catch (Throwable t) {
-            logger.warn("启动统计上报失败", t);
+            PluginLogger.warn(logger, "启动统计上报失败", t);
         }
     }
 
@@ -89,15 +96,20 @@ public final class VelocityPlugin {
 
         DetectorInitializer<Channel> newInitializer =
             new DetectorInitializer<>(logger, originalInitializer);
-        MethodHandle set = MethodHandles.lookup().unreflect(holderType.getMethod("set", ChannelInitializer.class));
-        try {
-            logger.info("正在替换通道初始化器；可以安全忽略下一条警告。");
-            // We use MethodHandle here because it has a cleaner stacktrace
-            // for ChannelInitializerHolder.set() to display
-            set.invoke(holder, newInitializer);
-        } catch (Throwable e) {
-            sneakyThrow(e);
+        replaceInitializer(holder, holderType, newInitializer);
+        PluginLogger.info(logger, "已静默替换通道初始化器。");
+    }
+
+    static void replaceInitializer(Object holder, Class<?> holderType, ChannelInitializer<?> newInitializer)
+            throws ReflectiveOperationException {
+        for (Field field : holderType.getDeclaredFields()) {
+            if (ChannelInitializer.class.isAssignableFrom(field.getType())) {
+                field.setAccessible(true);
+                field.set(holder, newInitializer);
+                return;
+            }
         }
+        throw new NoSuchFieldException("未找到 Velocity 通道初始化器字段：" + holderType.getName());
     }
 
     static class DetectorInitializer<C extends Channel> extends ChannelInitializer<C> {
@@ -121,41 +133,8 @@ public final class VelocityPlugin {
 
         DetectorInitializer(@NotNull Logger logger, @NotNull ChannelInitializer<C> delegate) {
             this.logger = logger;
-            this.detectorLogger = createDetectorLogger(logger);
+            this.detectorLogger = LoggerBridge.createJulToSlf4jBridge(logger);
             this.delegate = delegate;
-        }
-
-        private static java.util.logging.Logger createDetectorLogger(Logger logger) {
-            java.util.logging.Logger detectorLogger = java.util.logging.Logger.getAnonymousLogger();
-            detectorLogger.setUseParentHandlers(false);
-            detectorLogger.addHandler(new Handler() {
-                @Override
-                public void publish(LogRecord record) {
-                    if (!isLoggable(record))
-                        return;
-
-                    Throwable thrown = record.getThrown();
-                    String message = record.getMessage();
-                    int level = record.getLevel().intValue();
-                    if (level >= java.util.logging.Level.SEVERE.intValue())
-                        logger.error(message, thrown);
-                    else if (level >= java.util.logging.Level.WARNING.intValue())
-                        logger.warn(message, thrown);
-                    else if (level >= java.util.logging.Level.INFO.intValue())
-                        logger.info(message, thrown);
-                    else
-                        logger.debug(message, thrown);
-                }
-
-                @Override
-                public void flush() {
-                }
-
-                @Override
-                public void close() {
-                }
-            });
-            return detectorLogger;
         }
 
         @Override
@@ -168,22 +147,83 @@ public final class VelocityPlugin {
             }
 
             ChannelPipeline pipeline = ch.pipeline();
-            if (!ch.isOpen() || pipeline.get("proxy-identity") != null)
+            if (!PipelineInjector.canInject(pipeline, "proxyidentity"))
                 return;
 
             HAProxyMessageDecoder haproxyDecoder = pipeline.get(HAProxyMessageDecoder.class);
             if (haproxyDecoder != null) {
-                pipeline.replace(haproxyDecoder, "proxy-identity", new ProxyProtocolSwitchHandler(detectorLogger, null));
+                pipeline.remove(haproxyDecoder);
+                addDetector(pipeline);
+                addTimeoutTrap(pipeline);
+                return;
+            }
+
+            addDetector(pipeline);
+            addTimeoutTrap(pipeline);
+        }
+
+        private void addDetector(ChannelPipeline pipeline) {
+            ProxyProtocolSwitchHandler detector = new ProxyProtocolSwitchHandler(detectorLogger, null);
+            String inboundName = findFirstNonTimeoutInboundHandlerName(pipeline);
+            if (inboundName != null) {
+                pipeline.addBefore(inboundName, "proxyidentity", detector);
+                return;
+            }
+
+            String timeoutName = findTimeoutHandlerName(pipeline);
+            if (timeoutName != null) {
+                pipeline.addAfter(timeoutName, "proxyidentity", detector);
                 return;
             }
 
             String decoderName = findFirstDecoderName(pipeline);
             if (decoderName != null) {
-                pipeline.addBefore(decoderName, "proxy-identity", new ProxyProtocolSwitchHandler(detectorLogger, null));
+                pipeline.addBefore(decoderName, "proxyidentity", detector);
                 return;
             }
 
             throw new RuntimeException("未找到可插入 PROXY protocol 检测器的 Velocity 解码器：" + pipeline.names());
+        }
+
+        private void addTimeoutTrap(ChannelPipeline pipeline) {
+            if (pipeline.get("proxyidentity-timeout") != null) {
+                return;
+            }
+            String timeoutName = findTimeoutHandlerName(pipeline);
+            if (timeoutName != null) {
+                pipeline.addAfter(timeoutName, "proxyidentity-timeout", new VelocityTimeoutHandler(detectorLogger));
+            }
+        }
+
+        private String findTimeoutHandlerName(ChannelPipeline pipeline) {
+            if (pipeline.get("timeout") != null) {
+                return "timeout";
+            }
+            if (pipeline.get("read-timeout") != null) {
+                return "read-timeout";
+            }
+            for (Map.Entry<String, ChannelHandler> entry : pipeline) {
+                if (entry.getValue() instanceof ReadTimeoutHandler) {
+                    return entry.getKey();
+                }
+            }
+            return null;
+        }
+
+        private String findFirstNonTimeoutInboundHandlerName(ChannelPipeline pipeline) {
+            for (Map.Entry<String, ChannelHandler> entry : pipeline) {
+                if (isTimeoutHandler(entry.getKey(), entry.getValue())) {
+                    continue;
+                }
+                if (entry.getValue() instanceof ChannelInboundHandler) {
+                    return entry.getKey();
+                }
+            }
+            return null;
+        }
+
+        private boolean isTimeoutHandler(String name, ChannelHandler handler) {
+            return "timeout".equals(name) || "read-timeout".equals(name) || handler instanceof ReadTimeoutHandler;
         }
 
         private String findFirstDecoderName(ChannelPipeline pipeline) {
@@ -195,4 +235,25 @@ public final class VelocityPlugin {
             return null;
         }
     }
+
+    static final class VelocityTimeoutHandler extends ChannelInboundHandlerAdapter {
+        private final java.util.logging.Logger logger;
+
+        VelocityTimeoutHandler(java.util.logging.Logger logger) {
+            this.logger = logger;
+        }
+
+        @Override
+        public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+            if (cause instanceof ReadTimeoutException) {
+                if (logger != null && ProxyIdentityConfig.debug) {
+                    PluginLogger.jul(logger, java.util.logging.Level.FINE, "Velocity 初始连接读取超时，已静默关闭: " + ctx.channel().remoteAddress(), null);
+                }
+                ctx.close();
+                return;
+            }
+            super.exceptionCaught(ctx, cause);
+        }
+    }
 }
+

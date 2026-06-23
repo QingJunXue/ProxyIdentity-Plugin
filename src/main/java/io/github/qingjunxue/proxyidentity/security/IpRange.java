@@ -1,4 +1,4 @@
-package io.github.qingjunxue.proxyidentity;
+package io.github.qingjunxue.proxyidentity.security;
 
 import org.apache.commons.validator.routines.InetAddressValidator;
 import org.jetbrains.annotations.NotNull;
@@ -67,7 +67,7 @@ public final class IpRange {
         this(addr, addr.getAddress().length * Byte.SIZE);
     }
 
-    IpRange(@NotNull String addr, int prefix) throws IllegalArgumentException, UnknownHostException {
+    public IpRange(@NotNull String addr, int prefix) throws IllegalArgumentException, UnknownHostException {
         this(InetAddress.getByName(addr), prefix);
     }
 

@@ -1,5 +1,6 @@
 package io.github.qingjunxue.proxyidentity;
 
+import io.github.qingjunxue.proxyidentity.security.TrustedProxyGate;
 import org.bstats.charts.CustomChart;
 import org.bstats.charts.SimplePie;
 
@@ -12,9 +13,9 @@ public final class TelemetryCharts {
     }
 
     static String getWhitelistCountLabel() {
-        return TrustedProxyList.whitelist == null
+        return TrustedProxyGate.whitelist == null
                 ? "disabled"
-                : Integer.toString(TrustedProxyList.whitelist.size());
+                : Integer.toString(TrustedProxyGate.whitelist.size());
     }
 
     private TelemetryCharts() {throw new AssertionError();}

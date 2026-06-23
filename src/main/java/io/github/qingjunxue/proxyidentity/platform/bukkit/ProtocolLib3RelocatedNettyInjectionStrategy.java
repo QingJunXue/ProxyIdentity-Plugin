@@ -1,9 +1,10 @@
 package io.github.qingjunxue.proxyidentity.platform.bukkit;
 
 import com.comphenix.protocol.utility.MinecraftReflection;
-import io.github.qingjunxue.proxyidentity.GuardConfig;
-import io.github.qingjunxue.proxyidentity.ProxyProtocolHeaderParser;
-import io.github.qingjunxue.proxyidentity.TrustedProxyList;
+import io.github.qingjunxue.proxyidentity.ProxyIdentityConfig;
+import io.github.qingjunxue.proxyidentity.protocol.ProxyProtocolHeaderParser;
+import io.github.qingjunxue.proxyidentity.security.TrustedProxyGate;
+import io.github.qingjunxue.proxyidentity.util.PluginLogger;
 import org.bukkit.Bukkit;
 
 import java.lang.reflect.Field;
@@ -23,8 +24,8 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public class ProtocolLib3RelocatedNettyInjectionStrategy implements ProtocolLibInjectionStrategy {
-    private static final String SERVER_HANDLER_NAME = "proxy-identity-server";
-    private static final String CONNECTION_HANDLER_NAME = "proxy-identity";
+    private static final String SERVER_HANDLER_NAME = "proxyidentity-server";
+    private static final String CONNECTION_HANDLER_NAME = "proxyidentity";
 
     private final Logger logger;
     private final List<Object> serverChannels = new ArrayList<>();
@@ -78,9 +79,9 @@ public class ProtocolLib3RelocatedNettyInjectionStrategy implements ProtocolLibI
         if (!injectedAny) {
             throw new IllegalStateException("Unable to locate Bukkit 1.7.x server channels for PROXY protocol guard");
         }
-        logger.info("已启用 Bukkit 1.7.x / ProtocolLib 3.x 专用 PROXY protocol 注入。");
-        if (GuardConfig.debug) {
-            logger.info("已向 " + serverChannels.size() + " 个服务端通道注入 PROXY protocol guard。");
+        PluginLogger.info(logger, "已启用 Bukkit 1.7.x / ProtocolLib 3.x 专用 PROXY protocol 注入。");
+        if (ProxyIdentityConfig.debug) {
+            PluginLogger.info(logger, "已向 " + serverChannels.size() + " 个服务端通道注入 PROXY protocol guard。");
         }
     }
 
@@ -230,8 +231,8 @@ public class ProtocolLib3RelocatedNettyInjectionStrategy implements ProtocolLibI
 
         private void handleChannelRead(Object self, Object ctx, Object msg) throws Throwable {
             if (!isByteBuf(msg)) {
-                if (GuardConfig.debug) {
-                    logger.info("PROXY protocol guard 收到非 ByteBuf 消息 "
+                if (ProxyIdentityConfig.debug) {
+                    PluginLogger.info(logger, "PROXY protocol guard 收到非 ByteBuf 消息 "
                             + (msg == null ? "null" : msg.getClass().getName())
                             + "; pipeline=" + pipelineNames(ProtocolLib3RelocatedNettyInjectionStrategy.this.invoke(ctx, "pipeline")));
                 }
@@ -242,7 +243,7 @@ public class ProtocolLib3RelocatedNettyInjectionStrategy implements ProtocolLibI
 
             byte[] readable = readBytes(msg, 232);
             ProxyProtocolHeaderParser.Result result = ProxyProtocolHeaderParser.detect(readable, readable.length);
-            if (!GuardConfig.proxyProtocolEnabled) {
+            if (!ProxyIdentityConfig.proxyProtocolEnabled) {
                 Object pipeline = ProtocolLib3RelocatedNettyInjectionStrategy.this.invoke(ctx, "pipeline");
                 pipelineRemove(pipeline, self);
                 ProtocolLib3RelocatedNettyInjectionStrategy.this.invoke(ctx, "fireChannelRead",
@@ -258,23 +259,23 @@ public class ProtocolLib3RelocatedNettyInjectionStrategy implements ProtocolLibI
             pipelineRemove(pipeline, self);
 
             if (result.state() == ProxyProtocolHeaderParser.State.INVALID) {
-                if (GuardConfig.debug) {
-                    logger.info("连接未携带 PROXY protocol 头，已按直连放行。");
+                if (ProxyIdentityConfig.debug) {
+                    PluginLogger.info(logger, "连接未携带 PROXY protocol 头，已按直连放行。");
                 }
                 ProtocolLib3RelocatedNettyInjectionStrategy.this.invoke(ctx, "fireChannelRead",
                         new Class<?>[] { Object.class }, msg);
                 return;
             }
-            if ((result.version() == 1 && !GuardConfig.acceptV1) || (result.version() == 2 && !GuardConfig.acceptV2)) {
+            if ((result.version() == 1 && !ProxyIdentityConfig.acceptV1) || (result.version() == 2 && !ProxyIdentityConfig.acceptV2)) {
                 ProtocolLib3RelocatedNettyInjectionStrategy.this.invoke(ctx, "close");
                 return;
             }
 
             SocketAddress remoteAddress = (SocketAddress) ProtocolLib3RelocatedNettyInjectionStrategy.this.invoke(
                     channel, "remoteAddress");
-            if (!TrustedProxyList.check(remoteAddress)) {
+            if (!TrustedProxyGate.check(remoteAddress)) {
                 try {
-                    TrustedProxyList.getWarningFor(remoteAddress).ifPresent(logger::warning);
+                    TrustedProxyGate.getWarningFor(remoteAddress).ifPresent(message -> PluginLogger.warning(logger, message));
                 } finally {
                     ProtocolLib3RelocatedNettyInjectionStrategy.this.invoke(ctx, "close");
                 }
@@ -283,9 +284,10 @@ public class ProtocolLib3RelocatedNettyInjectionStrategy implements ProtocolLibI
 
             if (result.sourceAddress() != null) {
                 setNetworkManagerAddress(pipeline, result.sourceAddress());
-                if (GuardConfig.debug) {
-                    logger.log(Level.INFO, "PROXY protocol {0}：设置真实远程地址 {1} -> {2}",
-                            new Object[] { connectionIntent(readable, result), remoteAddress, result.sourceAddress() });
+                if (ProxyIdentityConfig.debug) {
+                    PluginLogger.jul(logger, Level.INFO,
+                            "PROXY protocol " + connectionIntent(readable, result)
+                                    + "：设置真实远程地址 " + remoteAddress + " -> " + result.sourceAddress(), null);
                 }
             }
 
@@ -571,3 +573,4 @@ public class ProtocolLib3RelocatedNettyInjectionStrategy implements ProtocolLibI
         return 0;
     }
 }
+

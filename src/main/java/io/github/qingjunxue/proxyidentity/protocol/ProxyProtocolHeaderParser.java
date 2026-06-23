@@ -1,4 +1,4 @@
-package io.github.qingjunxue.proxyidentity;
+package io.github.qingjunxue.proxyidentity.protocol;
 
 import java.net.InetAddress;
 import java.net.InetSocketAddress;

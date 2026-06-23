@@ -38,3 +38,7 @@ Thumbs.db
 # IDEA
 .idea/
 *.iws
+
+# Agent Collaboration (Local Only)
+AGENTS.md
+CHANGELOG/

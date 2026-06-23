@@ -8,11 +8,12 @@ import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandler;
 import io.netty.channel.ChannelPipeline;
-import io.github.qingjunxue.proxyidentity.ProxyProtocolSwitchHandler;
+import io.github.qingjunxue.proxyidentity.protocol.ProxyProtocolSwitchHandler;
+import io.github.qingjunxue.proxyidentity.util.PipelineInjector;
+import io.github.qingjunxue.proxyidentity.util.PluginLogger;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Proxy;
-import java.util.NoSuchElementException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -85,37 +86,26 @@ public class ModernProtocolLibInjectionStrategy implements ProtocolLibInjectionS
         if (ch.eventLoop().inEventLoop()) {
             try {
                 ChannelPipeline pipeline = ch.pipeline();
-                if (!ch.isOpen() || pipeline.get("proxy-identity") != null) {
+                if (!PipelineInjector.canInject(pipeline, "proxyidentity")) {
                     return;
                 }
 
-                if (pipeline.get("haproxy-decoder") != null) {
-                    pipeline.remove("haproxy-decoder");
-                }
+                PipelineInjector.removeIfExists(pipeline, "haproxy-decoder");
 
-                ChannelHandler haproxyHandler;
-                if (pipeline.get("haproxy-handler") != null) {
-                    haproxyHandler = pipeline.remove("haproxy-handler");
-                } else {
+                ChannelHandler haproxyHandler = PipelineInjector.removeIfExists(pipeline, "haproxy-handler");
+                if (haproxyHandler == null) {
                     ChannelHandler networkManager = BukkitPlugin.getNetworkManager(pipeline);
                     haproxyHandler = new BukkitProxyAddressHandler(networkManager);
                 }
 
                 ProxyProtocolSwitchHandler detector = new ProxyProtocolSwitchHandler(logger, haproxyHandler);
-                try {
-                    pipeline.addAfter("timeout", "proxy-identity", detector);
-                } catch (NoSuchElementException e) {
-                    pipeline.addFirst("proxy-identity", detector);
-                }
+                PipelineInjector.addAfterOrFirst(pipeline, "timeout", "proxyidentity", detector);
             } catch (Throwable t) {
-                if (logger != null) {
-                    logger.log(Level.WARNING, "注入代理检测器时发生异常", t);
-                } else {
-                    t.printStackTrace();
-                }
+                PluginLogger.jul(logger, Level.WARNING, "注入代理检测器时发生异常", t);
             }
         } else {
             ch.eventLoop().execute(() -> this.doInject(ch));
         }
     }
 }
+

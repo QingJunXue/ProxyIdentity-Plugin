@@ -1,4 +1,4 @@
-package io.github.qingjunxue.proxyidentity;
+package io.github.qingjunxue.proxyidentity.security;
 
 import org.junit.jupiter.api.Test;
 
